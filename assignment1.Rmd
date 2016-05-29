@@ -1,0 +1,154 @@
+---
+title: "Practical Machine Learning Prediction Assignment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+This is a prediction assignment for the course (Pratical Machine Learning) offered by Johns Hopkins University.
+
+## Datasets
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har
+
+Load the caret and randomForest library which we will use later.
+```{r library}
+library(caret)
+library(randomForest)
+```
+
+Download the training and test dataset, load the files it and define NA strings.
+```{r load}
+#load the dataset
+training <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+testing  <- read.csv("pml-testing.csv",  na.strings = c("NA", "#DIV/0!", ""))
+```
+
+Check the dimensions of the training and testing datasets. There are 19622 rows for training datasets and 20 rows for testing datasets, both with 160 columns which contains a lot of noise and not useful information for predictions
+```{r check dimensions1}
+#check the dimensions and samples to get an overview of the dataset
+dim(training)
+dim(testing)
+table(training$classe)
+```
+
+As there are many columns which are NA values, it is a good practice to remove them before data analysis and modelling.
+```{r remove NA}
+#Remove columns which are mostly NA
+is_data  <- apply(!is.na(training), 2, sum) > 19621
+training <- training[, is_data]
+testing  <- testing[, is_data]
+```
+
+There are only 60 columns left for both training and test datasets
+```{r check dimensions2}
+#Check the dimensions and 60 columns left
+dim(training)
+dim(testing)
+```
+
+Columns 1:6 are also removed as they are not useful for the predictions. Columns removed are: x, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window. It is always good to eliminate useless columns for faster data processing and reducing noise. Now, we have 54 varaibles including the classe varaible.
+
+```{r remove columns}
+#Remove columns 1:6 which are informations not related
+training <- training[, 7:60]
+testing <- testing[, 7:60]
+```
+
+Next, we partition the training dataset into train1 (60%) and train2 (40%) for measuring the accuracy of our prediction model.
+```{r partition}
+#Partition the training set for training and testing
+set.seed(1010)
+inTrain <- createDataPartition(y=training$classe, p=0.60, list=FALSE)
+train1  <- training[inTrain,]
+train2  <- training[-inTrain,]
+dim(train1)
+dim(train2)
+```
+
+Next, we try to remove near zero covariates as they are useless for prediction. After running below code, it is found that there is no columns removed further. It implies that before data cleaning is enough.
+```{r remove zero covariates}
+#Remove near zero covariates from train1 and train2
+nzv_cols <- nearZeroVar(train1)
+if(length(nzv_cols) > 0) {
+  train1 <- train1[, -nzv_cols]
+  train2 <- train2[, -nzv_cols]
+}
+dim(train1)
+dim(train2)
+```
+
+## Data Analysis
+We used randomForest to train a model and plot the variable importance plot. Then we select the top 10 variables from the accuracy and gini graph to prevent overfitting.
+```{r select predictors}
+#Check the accurary and gini graphs and select predictors
+set.seed(1010)
+fitModel <- randomForest(classe~., data=train1, importance=TRUE, ntree=100)
+varImpPlot(fitModel)
+```
+
+The 10 variables are:
+Our 10 covariates are: yaw_belt, roll_belt, num_window, pitch_belt, magnet_dumbbell_y, magnet_dumbbell_z, pitch_forearm, accel_dumbbell_y, roll_arm, and roll_forearm.
+
+## Modelling
+```{r train rf}
+#train the model with random forest
+set.seed(1010)
+fitModel <- randomForest(classe~roll_belt+yaw_belt+num_window+pitch_belt+magnet_dumbbell_y+magnet_dumbbell_z+pitch_forearm+accel_dumbbell_y+roll_arm+roll_forearm, data=train1, importance=TRUE, ntree=100)
+```
+
+Then we predict the train2 with the model (fitModel) and check the prediction accuracy.
+```{r predict}
+predictions <- predict(fitModel, newdata=train2)
+confusionMat <- confusionMatrix(predictions, train2$classe)
+confusionMat
+```
+99.86% is a very high accuracy and it proves the 10 covariates is suffificent to do a good job in prediction.
+
+The out-of-sample error rate is 0.14% which is very low.
+```{r check out-of-sample error}
+#Check out-of-sample error rate
+missClass = function(values, predicted) {
+  sum(predicted != values) / length(values)
+}
+OOS_errRate = missClass(train2$classe, predictions)
+OOS_errRate
+```
+
+Then we are going to predict the 20 test cases.
+```{r predict 20 case}
+#Predict with the 20 testing data
+predictions <- predict(fitModel, newdata=testing)
+testing$classe <- predictions
+```
+
+Below code is used to genearte 20 files for submission to coursera
+```{r submit}
+#Output the answers to a file
+submit <- data.frame(problem_id = testing$problem_id, classe = predictions)
+write.csv(submit, file = "coursera-submission.csv", row.names = FALSE)
+
+#Output the answers to separate files for upload
+answers = testing$classe
+write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_",i,".txt")
+    write.table(x[i], file=filename, quote=FALSE, row.names=FALSE, col.names=FALSE)
+  }
+}
+write_files(answers)
+```
+
+
+
