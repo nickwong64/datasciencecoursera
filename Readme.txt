@@ -1,0 +1,1 @@
+This is a prediction assignment for the course (Pratical Machine Learning) offered by Johns Hopkins University.
